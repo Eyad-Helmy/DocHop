@@ -1,0 +1,23 @@
+[project]
+name = "codearchguard"
+version = "0.1.0"
+description = "GraphRAG-powered codebase architecture and refactoring impact assistant for Python repos"
+requires-python = ">=3.10"
+dependencies = ["neo4j>=5.0", "jedi>=0.19"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+cag = "codearchguard.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
