@@ -7,6 +7,8 @@ dependencies = ["neo4j>=5.0", "jedi>=0.19"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+vis = ["matplotlib>=3.7", "networkx>=3.0"]
+all = ["pytest>=7", "matplotlib>=3.7", "networkx>=3.0"]
 
 [project.scripts]
 cag = "codearchguard.cli:main"
