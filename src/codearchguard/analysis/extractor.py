@@ -318,3 +318,27 @@ def _collect_relations(graph, info, collect_inheritance=True, collect_calls=True
                                 )
                         graph.add_edge(Edge(fid, t, EdgeKind.CALLS, call.lineno))
     visit(info.tree.body, info.mod, None)
+
+    if collect_calls:
+        for stmt in info.tree.body:
+            if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for call in (n for n in ast.walk(stmt) if isinstance(n, ast.Call)):
+                d = _dotted(call.func)
+                target = _lookup(graph, info, d, None, call.func) if d else None
+                if target and target != info.mod:
+                    if graph.nodes[target].kind == NodeKind.CLASS:
+                        constructor = target
+                        visited = set()
+                        while constructor and constructor not in visited:
+                            visited.add(constructor)
+                            initializer = f"{constructor}.__init__"
+                            if initializer in graph.nodes:
+                                target = initializer
+                                break
+                            constructor = next(
+                                (edge.dst for edge in graph.edges_of(EdgeKind.INHERITS)
+                                 if edge.src == constructor),
+                                None,
+                            )
+                    graph.add_edge(Edge(info.mod, target, EdgeKind.CALLS, call.lineno))
