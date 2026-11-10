@@ -31,7 +31,8 @@ def test_calls():
     c = pairs(g, EdgeKind.CALLS)
     assert ("shop.billing.checkout", "shop.billing.make_item") in c
     assert ("shop.billing.checkout", "shop.billing.helper") in c
-    assert ("shop.billing.make_item", "shop.models.DiscountedItem") in c
+    assert ("shop.billing.make_item", "shop.models.Item.__init__") in c         # -> if it calls parent class instructor function's node
+    assert ("shop.billing.make_item", "shop.models.DiscountedItem") not in c    # -> and not the class node itself
 
 
 def test_repo_root_src_layout_uses_importable_module_names(tmp_path):

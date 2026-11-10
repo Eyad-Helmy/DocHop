@@ -30,7 +30,6 @@ def _pyproject_source_roots(root: Path) -> list[str]:
         try:
             import tomllib
         except ModuleNotFoundError:  # Python versions < 3.11
-            # Python 3.10 needs the compatible TOML reader dependency.
             import tomli as tomllib
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -83,7 +82,7 @@ def _setup_py_source_roots(root: Path) -> list[str]:
         return []
 
     roots: list[str] = []
-    # Inspect only literal arguments, never execute project setup code.
+    # Inspect only literal arguments to not execute project setup code.
     for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
         for keyword in call.keywords:
             if keyword.arg == "package_dir" and isinstance(keyword.value, ast.Dict):
@@ -187,11 +186,16 @@ def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = 
 
     modules = {f.mod for f in files}
 
-    # ---- Pass 2: relationships -----------------------------------------
+    # ---- Pass 2: imports, then relationships ---------------------------
+    # Resolve every import before collecting calls and inheritance so a
+    # constructor lookup can follow bases declared in any source file.
     for info in files:
         is_pkg = info.rel.endswith("__init__.py")
         _collect_imports(graph, info, modules, is_pkg)
-        _collect_relations(graph, info)
+    for info in files:
+        _collect_relations(graph, info, collect_inheritance=True, collect_calls=False)
+    for info in files:
+        _collect_relations(graph, info, collect_inheritance=False, collect_calls=True)
     return graph
 
 
@@ -248,7 +252,7 @@ def _lookup(graph, info, dotted: str, scope_cls: str | None) -> str | None:
     return next((c for c in candidates if c in graph.nodes), None)
 
 
-def _collect_relations(graph, info):
+def _collect_relations(graph, info, collect_inheritance=True, collect_calls=True):
     def visit(body, prefix, scope_cls):
         for stmt in body:
             if isinstance(stmt, ast.ClassDef):
@@ -256,16 +260,28 @@ def _collect_relations(graph, info):
                 for base in stmt.bases:
                     d = _dotted(base)
                     t = _lookup(graph, info, d, None) if d else None
-                    if t and graph.nodes[t].kind == NodeKind.CLASS:
+                    if collect_inheritance and t and graph.nodes[t].kind == NodeKind.CLASS:
                         graph.add_edge(Edge(cid, t, EdgeKind.INHERITS, stmt.lineno))
                 visit(stmt.body, cid, cid)
-            elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            elif collect_calls and isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 fid = f"{prefix}.{stmt.name}"
                 for call in (n for n in ast.walk(stmt) if isinstance(n, ast.Call)):
                     d = _dotted(call.func)
                     t = _lookup(graph, info, d, scope_cls) if d else None
                     if t and t != fid:
                         if graph.nodes[t].kind == NodeKind.CLASS:   # constructor call
-                            t = f"{t}.__init__" if f"{t}.__init__" in graph.nodes else t
+                            constructor = t
+                            visited = set()
+                            while constructor and constructor not in visited:
+                                visited.add(constructor)
+                                initializer = f"{constructor}.__init__"
+                                if initializer in graph.nodes:
+                                    t = initializer
+                                    break
+                                constructor = next(
+                                    (edge.dst for edge in graph.edges_of(EdgeKind.INHERITS)
+                                     if edge.src == constructor),
+                                    None,
+                                )
                         graph.add_edge(Edge(fid, t, EdgeKind.CALLS, call.lineno))
     visit(info.tree.body, info.mod, None)
