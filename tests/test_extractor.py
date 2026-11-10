@@ -118,3 +118,40 @@ def test_unknown_container_is_not_stripped(tmp_path):
     graph = extract_graph(tmp_path)
 
     assert "backend.app" in graph.nodes
+
+
+def test_local_instance_method_calls_are_resolved(tmp_path):
+    (tmp_path / "store.py").write_text(
+        "class Neo4jStore:\n"
+        "    def __init__(self): pass\n"
+        "    def init_schema(self): pass\n"
+        "    def save(self, graph): pass\n"
+        "    def close(self): pass\n"
+    )
+    (tmp_path / "cli.py").write_text(
+        "from store import Neo4jStore\n\n"
+        "def main():\n"
+        "    store = Neo4jStore()\n"
+        "    store.init_schema()\n"
+        "    store.save(None)\n"
+        "    store.close()\n"
+    )
+
+    graph = extract_graph(tmp_path)
+    calls = pairs(graph, EdgeKind.CALLS)
+
+    assert ("cli.main", "store.Neo4jStore.init_schema") in calls
+    assert ("cli.main", "store.Neo4jStore.save") in calls
+    assert ("cli.main", "store.Neo4jStore.close") in calls
+
+
+def test_module_level_calls_are_traced(tmp_path):
+    (tmp_path / "helpers.py").write_text("def work(): pass\n")
+    (tmp_path / "entry.py").write_text(
+        "from helpers import work\n\n"
+        "work()\n"
+    )
+
+    graph = extract_graph(tmp_path)
+
+    assert ("entry", "helpers.work") in pairs(graph, EdgeKind.CALLS)
