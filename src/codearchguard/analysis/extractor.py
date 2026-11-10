@@ -143,8 +143,8 @@ def iter_python_files(root: Path):
 
 
 class _FileInfo:
-    def __init__(self, mod: str, rel: str, tree: ast.Module):
-        self.mod, self.rel, self.tree = mod, rel, tree
+    def __init__(self, mod: str, rel: str, path: Path, source: str, tree: ast.Module):
+        self.mod, self.rel, self.path, self.source, self.tree = mod, rel, path, source, tree
         self.aliases: dict[str, str] = {}   # local name -> dotted target
 
 
@@ -174,11 +174,12 @@ def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = 
     # ---- Pass 1: definitions -------------------------------------------
     for path in iter_python_files(root):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
         except (SyntaxError, UnicodeDecodeError):
             continue
         mod, rel = module_name(root, path, resolved_source_roots), str(path.relative_to(root))
-        info = _FileInfo(mod, rel, tree)
+        info = _FileInfo(mod, rel, path, source, tree)
         files.append(info)
         graph.add_node(Node(mod, NodeKind.MODULE, mod.split(".")[-1] or mod, rel,
                             1, len(path.read_text().splitlines()), ast.get_docstring(tree) or ""))
@@ -240,16 +241,36 @@ def _link_module(graph, src, target, modules, line):
         parts.pop()
 
 
-def _lookup(graph, info, dotted: str, scope_cls: str | None) -> str | None:
+def _lookup(graph, info, dotted: str, scope_cls: str | None, node: ast.AST | None = None,
+            local_types: dict[str, str] | None = None) -> str | None:
     head, _, rest = dotted.partition(".")
     candidates = []
     if head in ("self", "cls") and scope_cls and rest:
         candidates.append(f"{scope_cls}.{rest}")
+    if local_types and head in local_types and rest:
+        candidates.append(f"{local_types[head]}.{rest}")
     candidates.append(f"{info.mod}.{dotted}")
     if head in info.aliases:
         tgt = info.aliases[head]
         candidates.append(f"{tgt}.{rest}" if rest else tgt)
-    return next((c for c in candidates if c in graph.nodes), None)
+    resolved = next((c for c in candidates if c in graph.nodes), None)
+    if resolved or node is None:
+        return resolved
+
+    # Jedi can resolve calls that the lightweight AST/name rules cannot.
+    try:
+        import jedi
+        inferred = jedi.Script(code=info.source, path=str(info.path)).infer(
+            line=node.end_lineno or node.lineno,
+            column=node.end_col_offset if node.end_col_offset is not None else node.col_offset,
+        )
+    except Exception:
+        return None
+    for definition in inferred:
+        full_name = definition.full_name
+        if full_name in graph.nodes:
+            return full_name
+    return None
 
 
 def _collect_relations(graph, info, collect_inheritance=True, collect_calls=True):
@@ -265,9 +286,21 @@ def _collect_relations(graph, info, collect_inheritance=True, collect_calls=True
                 visit(stmt.body, cid, cid)
             elif collect_calls and isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 fid = f"{prefix}.{stmt.name}"
+                local_types = {}
+                for assigned in (n for n in ast.walk(stmt) if isinstance(n, (ast.Assign, ast.AnnAssign))):
+                    value = assigned.value
+                    if not isinstance(value, ast.Call):
+                        continue
+                    target = _lookup(graph, info, _dotted(value.func) or "", scope_cls)
+                    if not target or graph.nodes[target].kind != NodeKind.CLASS:
+                        continue
+                    targets = assigned.targets if isinstance(assigned, ast.Assign) else [assigned.target]
+                    for name in targets:
+                        if isinstance(name, ast.Name):
+                            local_types[name.id] = target
                 for call in (n for n in ast.walk(stmt) if isinstance(n, ast.Call)):
                     d = _dotted(call.func)
-                    t = _lookup(graph, info, d, scope_cls) if d else None
+                    t = _lookup(graph, info, d, scope_cls, call.func, local_types) if d else None
                     if t and t != fid:
                         if graph.nodes[t].kind == NodeKind.CLASS:   # constructor call
                             constructor = t
