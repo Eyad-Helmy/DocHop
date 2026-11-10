@@ -6,15 +6,131 @@ CALLS edges. Unresolvable names are skipped (jedi refinement comes later).
 """
 from __future__ import annotations
 import ast
+import configparser
 from pathlib import Path
+from typing import Iterable
 
 from codearchguard.models import CodeGraph, Edge, EdgeKind, Node, NodeKind
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", "build", "dist", ".tox"}
 
 
-def module_name(root: Path, file: Path) -> str:
-    rel = file.relative_to(root).with_suffix("")
+def _path_from_root(root: Path, value: str) -> Path:
+    # Convert a configured relative path into an absolute repository path.
+    path = Path(value)
+    return (path if path.is_absolute() else root / path).resolve()
+
+
+def _pyproject_source_roots(root: Path) -> list[str]:
+    # Read source locations declared by modern Python packaging tools.
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return []
+    try:
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python versions < 3.11
+            # Python 3.10 needs the compatible TOML reader dependency.
+            import tomli as tomllib
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+
+    tool = data.get("tool", {})
+    setuptools = tool.get("setuptools", {})
+    # Support the two common Setuptools declarations.
+    roots = list(setuptools.get("packages", {}).get("find", {}).get("where", []))
+    package_dir = setuptools.get("package-dir", {})
+    if isinstance(package_dir, dict) and isinstance(package_dir.get(""), str):
+        roots.append(package_dir[""])
+    # Poetry stores each package's source location in its ``from`` field.
+    for package in tool.get("poetry", {}).get("packages", []):
+        if isinstance(package, dict) and isinstance(package.get("from"), str):
+            roots.append(package["from"])
+    return roots
+
+
+def _setup_cfg_source_roots(root: Path) -> list[str]:
+    # Read source locations from legacy declarative Setuptools configuration.
+    path = root / "setup.cfg"
+    if not path.is_file():
+        return []
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(path, encoding="utf-8")
+    except (OSError, configparser.Error):
+        return []
+
+    roots: list[str] = []
+    if parser.has_option("options.packages.find", "where"):
+        roots.extend(parser.get("options.packages.find", "where").split())
+    if parser.has_option("options", "package_dir"):
+        for line in parser.get("options", "package_dir").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and not key.strip() and value.strip():
+                roots.append(value.strip())
+    return roots
+
+
+def _setup_py_source_roots(root: Path) -> list[str]:
+    """Read literal setuptools source-root declarations without executing setup.py."""
+    path = root / "setup.py"
+    if not path.is_file():
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+
+    roots: list[str] = []
+    # Inspect only literal arguments, never execute project setup code.
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        for keyword in call.keywords:
+            if keyword.arg == "package_dir" and isinstance(keyword.value, ast.Dict):
+                for key, value in zip(keyword.value.keys, keyword.value.values):
+                    if (isinstance(key, ast.Constant) and key.value == "" and
+                            isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                        roots.append(value.value)
+            elif (keyword.arg == "where" and isinstance(keyword.value, ast.Constant) and
+                  isinstance(keyword.value.value, str)):
+                roots.append(keyword.value.value)
+    return roots
+
+
+def discover_source_roots(root: Path, source_roots: Iterable[str | Path] | None = None) -> list[Path]:
+    """Return source roots in precedence order: explicit, config, convention."""
+    # An explicit caller choice takes priority over project configuration.
+    declared = list(source_roots) if source_roots is not None else (
+        _pyproject_source_roots(root) or _setup_cfg_source_roots(root) or _setup_py_source_roots(root)
+    )
+    # ``src`` is the only naming convention used when no configuration exists.
+    if not declared and (root / "src").is_dir():
+        declared = ["src"]
+
+    resolved: list[Path] = []
+    for value in declared:
+        candidate = _path_from_root(root, str(value))
+        # Reject invalid or external roots before scanning files.
+        if not candidate.is_dir():
+            raise ValueError(f"Source root does not exist or is not a directory: {value}")
+        try:
+            candidate.relative_to(root)
+        except ValueError as error:
+            raise ValueError(f"Source root must be inside the repository: {value}") from error
+        if candidate not in resolved:
+            resolved.append(candidate)
+    return resolved
+
+
+def module_name(root: Path, file: Path, source_roots: Iterable[Path] = ()) -> str:
+    # Use the deepest matching root; otherwise retain the full repository path.
+    source_root = next(
+        (candidate for candidate in sorted(source_roots, key=lambda p: len(p.parts), reverse=True)
+         if file.is_relative_to(candidate)),
+        root,
+    )
+    # Convert ``source_root/pkg/file.py`` into ``pkg.file``.
+    rel = file.relative_to(source_root).with_suffix("")
     parts = list(rel.parts)
     if parts and parts[-1] == "__init__":
         parts.pop()
@@ -49,8 +165,10 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
-def extract_graph(root: str | Path) -> CodeGraph:
+def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = None) -> CodeGraph:
     root = Path(root).resolve()
+    # Decide import roots once, then reuse them for every scanned file.
+    resolved_source_roots = discover_source_roots(root, source_roots)
     graph = CodeGraph()
     files: list[_FileInfo] = []
 
@@ -60,7 +178,7 @@ def extract_graph(root: str | Path) -> CodeGraph:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except (SyntaxError, UnicodeDecodeError):
             continue
-        mod, rel = module_name(root, path), str(path.relative_to(root))
+        mod, rel = module_name(root, path, resolved_source_roots), str(path.relative_to(root))
         info = _FileInfo(mod, rel, tree)
         files.append(info)
         graph.add_node(Node(mod, NodeKind.MODULE, mod.split(".")[-1] or mod, rel,

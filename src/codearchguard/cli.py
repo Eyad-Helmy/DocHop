@@ -8,12 +8,13 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("analyze", help="Parse a repo and print graph stats / optionally load Neo4j")
     a.add_argument("repo")
+    a.add_argument("--source-root", action="append", help="Source directory relative to the repository; repeat for multiple roots")
     a.add_argument("--neo4j-uri")
     a.add_argument("--user", default="neo4j")
     a.add_argument("--password", default="password")
     args = p.parse_args(argv)
 
-    g = extract_graph(args.repo)
+    g = extract_graph(args.repo, source_roots=args.source_root)
     print("Nodes:", dict(Counter(n.kind.value for n in g.nodes.values())))
     print("Edges:", dict(Counter(e.kind.value for e in g.edges)))
     if args.neo4j_uri:

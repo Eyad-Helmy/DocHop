@@ -68,6 +68,13 @@ Prints high-level node and edge count statistics:
 cag analyze path/to/repo
 ```
 
+Projects with a non-standard source container can declare it in their packaging
+configuration or pass it explicitly (repeat the option for multiple roots):
+
+```bash
+cag analyze path/to/repo --source-root backend
+```
+
 ### B. Ingest into Neo4j
 If you have a running Neo4j instance:
 
