@@ -54,14 +54,18 @@ def short_label(node_id: str) -> str:
 
 
 def compute_blast_radius(G: nx.DiGraph, start: str) -> set[str]:
-    """Reverse BFS on CALLS edges: who transitively calls `start`?"""
-    calls_rev = nx.DiGraph()
+    """Find callers, subclasses, and members affected by a changed symbol."""
+    affected = nx.DiGraph()
     for u, v, data in G.edges(data=True):
         if data.get("kind") == EdgeKind.CALLS:
-            calls_rev.add_edge(v, u)   # reversed
-    if start not in calls_rev:
+            affected.add_edge(v, u)  # callers
+        elif data.get("kind") == EdgeKind.INHERITS:
+            affected.add_edge(v, u)  # subclasses
+        elif data.get("kind") == EdgeKind.DEFINES:
+            affected.add_edge(u, v)  # contained classes and functions
+    if start not in affected:
         return {start}
-    return set(nx.descendants(calls_rev, start)) | {start}
+    return set(nx.descendants(affected, start)) | {start}
 
 
 def build_nx_graph(cg):
