@@ -182,7 +182,7 @@ def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = 
         info = _FileInfo(mod, rel, path, source, tree)
         files.append(info)
         graph.add_node(Node(mod, NodeKind.MODULE, mod.split(".")[-1] or mod, rel,
-                            1, len(path.read_text().splitlines()), ast.get_docstring(tree) or ""))
+                            1, len(path.read_text(encoding="utf-8").splitlines()), ast.get_docstring(tree) or ""))
         _collect_defs(graph, tree.body, mod, mod, rel)
 
     modules = {f.mod for f in files}

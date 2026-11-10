@@ -1,6 +1,23 @@
+
+# Python
 __pycache__/
+*.py[cod]
 *.egg-info/
 .venv/
 .pytest_cache/
-.brud/
+
+# IDE
+.idea/
 .vscode/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Generated vector storage
+storage/
+
+# OS
+.DS_Store
+Thumbs.db

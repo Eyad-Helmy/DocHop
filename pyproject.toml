@@ -1,9 +1,17 @@
+
 [project]
 name = "codearchguard"
 version = "0.1.0"
 description = "GraphRAG-powered codebase architecture and refactoring impact assistant for Python repos"
 requires-python = ">=3.10"
-dependencies = ["neo4j>=5.0", "jedi>=0.19", "tomli>=2.0; python_version < '3.11'"]
+dependencies = [
+    "neo4j>=5.0",
+    "jedi>=0.19",
+    "tomli>=2.0; python_version < '3.11'",
+    "llama-index-core>=0.14.25",
+    "llama-index-embeddings-huggingface>=0.8.0",
+    "llama-index-retrievers-bm25>=0.8.0"
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
@@ -21,5 +29,6 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src/codearchguard/rag"]
 pythonpath = ["src"]
+addopts = "--ignore=tests/fixtures/flask"

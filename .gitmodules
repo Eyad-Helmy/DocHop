@@ -1,0 +1,3 @@
+[submodule "tests/fixtures/flask"]
+	path = tests/fixtures/flask
+	url = https://github.com/pallets/flask.git

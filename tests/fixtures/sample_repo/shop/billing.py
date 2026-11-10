@@ -10,3 +10,15 @@ def checkout(p):
 
 def helper(item):
     return item
+def calculate_total(price, quantity):
+    """
+    Calculate the total price of products.
+
+    Args:
+        price: Price of one product.
+        quantity: Number of products.
+
+    Returns:
+        Total price.
+    """
+    return price * quantity
