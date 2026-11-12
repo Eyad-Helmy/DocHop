@@ -63,7 +63,6 @@ def _extract_class_code(source_lines, class_node):
     return "".join(result).strip()
 
 
-
 def _find_class_node(tree, start_line, end_line):
 
     for node in ast.walk(tree):
@@ -77,6 +76,39 @@ def _find_class_node(tree, start_line, end_line):
 
     return None
 
+
+def _extract_function_code(source_lines, func_node):
+    """
+    Extract function definition and body while excluding its docstring
+    so function docstrings are not duplicated across 'code' and 'docstring' chunks.
+    """
+    excluded_lines = set()
+
+    if func_node.body and _is_docstring(func_node.body[0]):
+        doc_stmt = func_node.body[0]
+        start_line = doc_stmt.lineno
+        end_line = doc_stmt.end_lineno or doc_stmt.lineno
+        excluded_lines.update(range(start_line, end_line + 1))
+
+    result = []
+    for line_number in range(
+        func_node.lineno,
+        (func_node.end_lineno or func_node.lineno) + 1
+    ):
+        if line_number not in excluded_lines:
+            result.append(source_lines[line_number - 1])
+
+    return "".join(result).strip()
+
+def _find_function_node(tree, start_line, end_line):
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.lineno == start_line
+            and node.end_lineno == end_line
+        ):
+            return node
+    return None
 
 
 
@@ -133,9 +165,19 @@ def extract_code_documents(
 
         else:
 
-            code_text = "".join(
-                source_lines[node.start_line - 1:node.end_line]
-            ).strip()
+            func_node = _find_function_node(
+                tree,
+                node.start_line,
+                node.end_line
+            )
+
+            if func_node is None:
+                continue
+
+            code_text = _extract_function_code(
+                source_lines,
+                func_node
+            )
 
         if not code_text:
             continue
