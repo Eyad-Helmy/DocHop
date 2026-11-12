@@ -87,6 +87,7 @@ def extract_code_documents(
 
     documents = []
     repo_root = Path(repo_root).resolve()
+    file_cache: dict[Path, tuple[list[str], ast.Module]] = {}
 
     for node in graph.nodes.values():
 
@@ -104,12 +105,15 @@ def extract_code_documents(
                 f"Source file not found for {node.id}: {source_path}"
             )
 
-        with tokenize.open(source_path) as file:
-            source = file.read()
+        if source_path not in file_cache:
+            with tokenize.open(source_path) as file:
+                source = file.read()
+            file_cache[source_path] = (
+                source.splitlines(keepends=True),
+                ast.parse(source, filename=str(source_path)),
+            )
 
-        source_lines = source.splitlines(keepends=True)
-
-        tree = ast.parse(source, filename=str(source_path))
+        source_lines, tree = file_cache[source_path]
 
         if node.kind == NodeKind.CLASS:
 
