@@ -21,29 +21,13 @@ REPO_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "flask"
 PERSIST_DIR = PROJECT_ROOT / "storage" / "vector_index"
 
 
-def test_llama_hybrid_search_on_flask():
-
-    # 1. Extract documents and chunks
-    ingestion_result = run_ingestion(
-        repo_root=REPO_ROOT
-    )
-
-    chunks = ingestion_result.chunks
-
+def test_llama_hybrid_search_on_flask(flask_ingestion_result, flask_vector_index):
+    # 1 - 3. Chunk, load embedder, load embeddings or create them
+    chunks = flask_ingestion_result.chunks
     print("\nTotal chunks:", len(chunks))
 
-    # 2. Build embedding model
-    embedder = LlamaBGEEmbedder()
-
-    # 3. Load existing index or build a new one
-    vector_index = load_or_build_vector_index(
-        chunks=chunks,
-        embedder=embedder,
-        persist_dir=str(PERSIST_DIR),
-    )
-
     # 4. Build vector retriever
-    vector_retriever = vector_index.as_retriever(
+    vector_retriever = flask_vector_index.as_retriever(
         similarity_top_k=10
     )
 

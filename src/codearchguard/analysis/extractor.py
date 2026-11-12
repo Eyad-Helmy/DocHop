@@ -9,10 +9,12 @@ import ast
 import configparser
 from pathlib import Path
 from typing import Iterable
+import builtins
 
 from codearchguard.models import CodeGraph, Edge, EdgeKind, Node, NodeKind
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", "build", "dist", ".tox"}
+_BUILTIN_NAMES = set(dir(builtins))
 
 
 def _path_from_root(root: Path, value: str) -> Path:
@@ -257,15 +259,25 @@ def _lookup(graph, info, dotted: str, scope_cls: str | None, node: ast.AST | Non
     if resolved or node is None:
         return resolved
 
+    # Skip Jedi if `head` is a Python builtin or neither a local/alias/same-module name
+    if head in _BUILTIN_NAMES:
+        return None
+    if head not in info.aliases and (not local_types or head not in local_types) and head not in ("self", "cls"):
+        if f"{info.mod}.{head}" not in graph.nodes:
+            return None
+
     # Jedi can resolve calls that the lightweight AST/name rules cannot.
     try:
         import jedi
-        inferred = jedi.Script(code=info.source, path=str(info.path)).infer(
+        if getattr(info, "_jedi_script", None) is None:
+            info._jedi_script = jedi.Script(code=info.source, path=str(info.path))
+        inferred = info._jedi_script.infer(
             line=node.end_lineno or node.lineno,
             column=node.end_col_offset if node.end_col_offset is not None else node.col_offset,
         )
     except Exception:
         return None
+
     for definition in inferred:
         full_name = definition.full_name
         if full_name in graph.nodes:

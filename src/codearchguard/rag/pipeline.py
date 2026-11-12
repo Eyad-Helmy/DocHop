@@ -34,7 +34,7 @@ def run_ingestion(
     code_documents = extract_code_documents(graph, repo_root)
 
     # 3. Extract documentation documents
-    documentation_documents = extract_documents(graph)
+    documentation_documents = extract_documents(graph, repo_root)
 
     # 4. Combine all documents
     documents = code_documents + documentation_documents
