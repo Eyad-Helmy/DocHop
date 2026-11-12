@@ -6,7 +6,7 @@ from codearchguard.rag.ingestion import extract_documents
 
 
 def test_extract_documents():
-    project_root = Path(__file__).resolve().parents[3]
+    project_root = Path(__file__).resolve().parents[1]
 
     sample_repo = project_root / "tests" / "fixtures" / "sample_repo"
 

@@ -8,7 +8,7 @@ from codearchguard.rag.chunking import chunk_documents
 
 def test_chunking():
 
-    project_root = Path(__file__).resolve().parents[3]
+    project_root = Path(__file__).resolve().parents[1]
     sample_repo = project_root / "tests" / "fixtures" / "sample_repo"
 
     graph = extract_graph(sample_repo)

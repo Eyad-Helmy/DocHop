@@ -58,6 +58,7 @@ def build_vector_index(
         node = TextNode(
             id_=chunk.id,
             text=chunk.text,
+            embedding=chunk.embedding,      # use the already existing embedding made by embed_documents() in llama_embedder
             metadata={
                 "owner_symbol_id": chunk.owner_symbol_id,
                 "source_type": chunk.source_type,

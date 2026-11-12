@@ -8,7 +8,7 @@ from codearchguard.rag.code_ingestion import extract_code_documents
 def test_extract_code_documents():
 
     # Locate project and sample repository
-    project_root = Path(__file__).resolve().parents[3]
+    project_root = Path(__file__).resolve().parents[1]
     sample_repo = project_root / "tests" / "fixtures" / "sample_repo"
 
     # Extract code graph

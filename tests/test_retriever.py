@@ -14,7 +14,7 @@ from codearchguard.rag.llama_hybrid_retriever import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 REPO_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "flask"
 

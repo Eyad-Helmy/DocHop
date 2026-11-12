@@ -6,7 +6,7 @@ from codearchguard.rag.llama_embedder import LlamaBGEEmbedder
 from codearchguard.rag.llama_vector_index import load_or_build_vector_index
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 REPO_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "flask"
 
