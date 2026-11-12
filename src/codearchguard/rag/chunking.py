@@ -96,6 +96,8 @@ def chunk_document(
     chunks = []
 
     for index, (piece, start, end) in enumerate(pieces):
+        chunk_start_line = document.start_line + text[:start].count("\n")
+        chunk_end_line = document.start_line + text[:end].count("\n")
 
         chunks.append(
             Chunk(
@@ -104,8 +106,8 @@ def chunk_document(
                 owner_symbol_id=document.owner_symbol_id,
                 source_type=document.source_type,
                 source_file=document.source_file,
-                start_line=document.start_line,
-                end_line=document.end_line,
+                start_line=chunk_start_line,
+                end_line=chunk_end_line,
                 chunk_index=index,
                 text=piece.strip(),
                 start_char=start,
