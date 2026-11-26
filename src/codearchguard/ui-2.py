@@ -31,7 +31,6 @@ _SRC_DIR = Path(__file__).resolve().parents[1]
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-import codearchguard.analysis.extractor as _extractor_mod
 from codearchguard.analysis.extractor import extract_graph
 from codearchguard.models import CodeGraph, EdgeKind, NodeKind
 from codearchguard.rag.chunking import chunk_documents
@@ -45,23 +44,6 @@ from codearchguard.rag.ingestion import extract_documents
 from codearchguard.rag.pipeline import RAGIngestionResult
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-# Skip nested `tests/fixtures/*` and `storage/` when analyzing `.` (DocHop root)
-_EXTRA_SKIP_DIRS = set(_extractor_mod.SKIP_DIRS) | {"storage"}
-
-
-def _clean_iter_python_files(root: Path):
-    for p in sorted(root.rglob("*.py")):
-        parts = p.relative_to(root).parts
-        if set(parts) & _EXTRA_SKIP_DIRS:
-            continue
-        if len(parts) >= 2 and parts[0] == "tests" and parts[1] == "fixtures":
-            continue
-        yield p
-
-
-_extractor_mod.iter_python_files = _clean_iter_python_files
-
 
 def _fast_ingest_without_duplicate_ast(
     repo_root: Path,

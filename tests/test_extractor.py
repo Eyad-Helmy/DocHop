@@ -1,8 +1,9 @@
 
 from pathlib import Path
 
+from codearchguard import analysis
 from codearchguard.analysis.extractor import extract_graph
-from codearchguard.models import EdgeKind
+from codearchguard.models import EdgeKind, NodeRole
 
 
 REPO = Path(__file__).parent / "fixtures" / "sample_repo"
@@ -184,3 +185,85 @@ def test_module_level_calls_are_traced(tmp_path):
     graph = extract_graph(tmp_path)
 
     assert ("entry", "helpers.work") in pairs(graph, EdgeKind.CALLS)
+
+
+def test_snapshot_metadata_is_attached_without_changing_graph_extraction(tmp_path, monkeypatch):
+    (tmp_path / "module.py").write_text("def work(): pass\n")
+    monkeypatch.setattr(
+        analysis.extractor,
+        "_git_snapshot",
+        lambda root: ("a" * 40, True),
+    )
+
+    graph = extract_graph(tmp_path)
+
+    assert graph.repository_root == str(tmp_path.resolve())
+    assert graph.commit_hash == "a" * 40
+    assert graph.is_dirty is True
+    assert "module.work" in graph.nodes
+
+
+def test_non_git_snapshot_is_explicitly_unknown(tmp_path, monkeypatch):
+    (tmp_path / "module.py").write_text("")
+    monkeypatch.setattr(analysis.extractor, "_git_snapshot", lambda root: (None, None))
+
+    graph = extract_graph(tmp_path)
+
+    assert graph.commit_hash is None
+    assert graph.is_dirty is None
+
+
+def test_dynamic_construct_warnings_are_scoped_to_the_enclosing_symbol(tmp_path):
+    (tmp_path / "dynamic.py").write_text(
+        "import importlib as il\n"
+        "from importlib import import_module as load_module\n\n"
+        "def uses_eval():\n    return eval('1 + 1')\n\n"
+        "def uses_exec():\n    exec('value = 1')\n\n"
+        "def uses_runtime_import():\n    return il.import_module('pkg')\n\n"
+        "def uses_import_alias():\n    return load_module('pkg')\n\n"
+        "def uses_dynamic_getattr(obj, name):\n    return getattr(obj, name)\n\n"
+        "def uses_literal_getattr(obj):\n    return getattr(obj, 'name')\n\n"
+        "class Holder:\n"
+        "    generated = __import__('generated')\n"
+        "    def ordinary(self):\n        return 1\n"
+    )
+
+    graph = extract_graph(tmp_path)
+
+    for symbol in (
+        "dynamic.uses_eval",
+        "dynamic.uses_exec",
+        "dynamic.uses_runtime_import",
+        "dynamic.uses_import_alias",
+        "dynamic.uses_dynamic_getattr",
+        "dynamic.Holder",
+    ):
+        assert graph.nodes[symbol].has_dynamic_warning
+    assert not graph.nodes["dynamic.uses_literal_getattr"].has_dynamic_warning
+    assert not graph.nodes["dynamic.Holder.ordinary"].has_dynamic_warning
+    assert not graph.nodes["dynamic"].has_dynamic_warning
+
+
+def test_pytest_and_main_guard_roles_preserve_structural_node_kinds(tmp_path):
+    (tmp_path / "helpers.py").write_text("def work(): pass\n")
+    (tmp_path / "test_helpers.py").write_text(
+        "def test_function(): pass\n\n"
+        "class TestFeature:\n"
+        "    def test_case(self): pass\n"
+    )
+    (tmp_path / "entry.py").write_text(
+        "from helpers import work\n\n"
+        "def main():\n    work()\n\n"
+        "if __name__ == '__main__':\n    main()\n"
+    )
+
+    graph = extract_graph(tmp_path)
+
+    assert NodeRole.TEST in graph.nodes["test_helpers"].roles
+    assert NodeRole.TEST in graph.nodes["test_helpers.test_function"].roles
+    assert NodeRole.TEST in graph.nodes["test_helpers.TestFeature"].roles
+    assert NodeRole.TEST in graph.nodes["test_helpers.TestFeature.test_case"].roles
+    assert NodeRole.ENTRY_POINT in graph.nodes["entry"].roles
+    assert NodeRole.ENTRY_POINT in graph.nodes["entry.main"].roles
+    assert graph.nodes["test_helpers.test_function"].kind.value == "Function"
+    assert graph.nodes["entry.main"].kind.value == "Function"

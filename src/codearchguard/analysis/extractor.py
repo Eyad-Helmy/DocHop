@@ -8,10 +8,11 @@ from __future__ import annotations
 import ast
 import configparser
 from pathlib import Path
+import subprocess
 from typing import Iterable
 import builtins
 
-from codearchguard.models import CodeGraph, Edge, EdgeKind, Node, NodeKind
+from codearchguard.models import CodeGraph, Edge, EdgeKind, Node, NodeKind, NodeRole
 
 SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", "build", "dist", ".tox"}
 _BUILTIN_NAMES = set(dir(builtins))
@@ -166,11 +167,100 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
+def _git_snapshot(root: Path) -> tuple[str | None, bool | None]:
+    """Return the checked-out commit and dirty state, or nulls outside Git."""
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True, timeout=5,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            capture_output=True, text=True, check=True, timeout=5,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    return head, bool(status.strip())
+
+
+def _import_aliases(tree: ast.Module) -> dict[str, str]:
+    """Return static import aliases needed by dynamic-call detection."""
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".")[0]] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            for alias in node.names:
+                if alias.name == "import_module":
+                    aliases[alias.asname or alias.name] = "importlib.import_module"
+    return aliases
+
+
+def _has_dynamic_construct(body: list[ast.stmt], aliases: dict[str, str]) -> bool:
+    """Detect calls whose target or member name cannot be known statically.
+
+    Nested definitions are intentionally excluded: each collected symbol receives
+    its own warning rather than warning every enclosing class or function.
+    """
+    dynamic_names = {"eval", "exec", "__import__", "importlib.import_module"}
+
+    class Visitor(ast.NodeVisitor):
+        found = False
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            return
+
+        def visit_Call(self, node: ast.Call) -> None:
+            dotted = _dotted(node.func)
+            if dotted:
+                head, dot, rest = dotted.partition(".")
+                resolved = f"{aliases[head]}.{rest}" if dot and head in aliases else aliases.get(head, dotted)
+                if resolved in dynamic_names:
+                    self.found = True
+                elif resolved == "getattr":
+                    # A literal member remains statically understandable.
+                    if len(node.args) < 2 or not isinstance(node.args[1], ast.Constant) or not isinstance(node.args[1].value, str):
+                        self.found = True
+            self.generic_visit(node)
+
+    visitor = Visitor()
+    for statement in body:
+        visitor.visit(statement)
+    return visitor.found
+
+
+def _is_main_guard(node: ast.If) -> bool:
+    test = node.test
+    return (
+        isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq)
+        and len(test.comparators) == 1
+        and isinstance(test.left, ast.Name) and test.left.id == "__name__"
+        and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value == "__main__"
+    )
+
+
+def _is_test_file(rel: str) -> bool:
+    name = Path(rel).name
+    return name.startswith("test_") or name.endswith("_test.py")
+
+
 def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = None) -> CodeGraph:
     root = Path(root).resolve()
     # Decide import roots once, then reuse them for every scanned file.
     resolved_source_roots = discover_source_roots(root, source_roots)
-    graph = CodeGraph()
+    commit_hash, is_dirty = _git_snapshot(root)
+    graph = CodeGraph(
+        repository_root=str(root),
+        commit_hash=commit_hash,
+        is_dirty=is_dirty,
+    )
     files: list[_FileInfo] = []
 
     # ---- Pass 1: definitions -------------------------------------------
@@ -182,10 +272,14 @@ def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = 
             continue
         mod, rel = module_name(root, path, resolved_source_roots), str(path.relative_to(root))
         info = _FileInfo(mod, rel, path, source, tree)
+        dynamic_aliases = _import_aliases(tree)
         files.append(info)
         graph.add_node(Node(mod, NodeKind.MODULE, mod.split(".")[-1] or mod, rel,
-                            1, len(source.splitlines()), ast.get_docstring(tree) or ""))
-        _collect_defs(graph, tree.body, mod, mod, rel)
+                            1, len(source.splitlines()), ast.get_docstring(tree) or "",
+                            _has_dynamic_construct(tree.body, dynamic_aliases)))
+        if _is_test_file(rel):
+            graph.add_role(mod, NodeRole.TEST)
+        _collect_defs(graph, tree.body, mod, mod, rel, dynamic_aliases)
 
     modules = {f.mod for f in files}
 
@@ -199,22 +293,42 @@ def extract_graph(root: str | Path, source_roots: Iterable[str | Path] | None = 
         _collect_relations(graph, info, collect_inheritance=True, collect_calls=False)
     for info in files:
         _collect_relations(graph, info, collect_inheritance=False, collect_calls=True)
+        _mark_entry_points(graph, info)
     return graph
 
 
-def _collect_defs(graph, body, parent_id, qual_prefix, rel):
+def _collect_defs(graph, body, parent_id, qual_prefix, rel, dynamic_aliases):
     for stmt in body:
         if isinstance(stmt, ast.ClassDef):
             cid = f"{qual_prefix}.{stmt.name}"
             graph.add_node(Node(cid, NodeKind.CLASS, stmt.name, rel, stmt.lineno,
-                                stmt.end_lineno or stmt.lineno, ast.get_docstring(stmt) or ""))
+                                stmt.end_lineno or stmt.lineno, ast.get_docstring(stmt) or "",
+                                _has_dynamic_construct(stmt.body, dynamic_aliases)))
             graph.add_edge(Edge(parent_id, cid, EdgeKind.DEFINES, stmt.lineno))
-            _collect_defs(graph, stmt.body, cid, cid, rel)
+            if stmt.name.startswith("Test"):
+                graph.add_role(cid, NodeRole.TEST)
+            _collect_defs(graph, stmt.body, cid, cid, rel, dynamic_aliases)
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             fid = f"{qual_prefix}.{stmt.name}"
             graph.add_node(Node(fid, NodeKind.FUNCTION, stmt.name, rel, stmt.lineno,
-                                stmt.end_lineno or stmt.lineno, ast.get_docstring(stmt) or ""))
+                                stmt.end_lineno or stmt.lineno, ast.get_docstring(stmt) or "",
+                                _has_dynamic_construct(stmt.body, dynamic_aliases)))
             graph.add_edge(Edge(parent_id, fid, EdgeKind.DEFINES, stmt.lineno))
+            if stmt.name.startswith("test_"):
+                graph.add_role(fid, NodeRole.TEST)
+
+
+def _mark_entry_points(graph: CodeGraph, info: _FileInfo) -> None:
+    """Mark main-guard modules and statically resolved functions they invoke."""
+    for statement in info.tree.body:
+        if not isinstance(statement, ast.If) or not _is_main_guard(statement):
+            continue
+        graph.add_role(info.mod, NodeRole.ENTRY_POINT)
+        for call in (node for node in ast.walk(statement) if isinstance(node, ast.Call)):
+            dotted = _dotted(call.func)
+            target = _lookup(graph, info, dotted, None, call.func) if dotted else None
+            if target:
+                graph.add_role(target, NodeRole.ENTRY_POINT)
 
 
 def _collect_imports(graph, info, modules, is_pkg):
