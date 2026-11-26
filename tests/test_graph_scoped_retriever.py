@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from codearchguard.analysis.extractor import extract_graph
+from codearchguard.models import Node, NodeKind
 from codearchguard.rag.chunking import chunk_documents
 from codearchguard.rag.code_ingestion import extract_code_documents
 from codearchguard.rag.graph_scoped_retriever import (
@@ -30,6 +31,40 @@ def test_compute_graph_blast_radius_excludes_unrelated_symbols():
     # Unrelated sibling functions in shop.billing are NOT in the blast radius
     assert "shop.billing.calculate_total" not in blast
     assert "shop.billing.helper" not in blast
+
+
+def test_blast_radius_uses_a_persisted_snapshot_when_a_store_is_supplied():
+    graph = extract_graph(REPO)
+
+    class Store:
+        def __init__(self):
+            self.args = None
+
+        def blast_radius(self, *args, **kwargs):
+            self.args = (args, kwargs)
+            return [Node("persisted.result", NodeKind.FUNCTION, "result", "result.py")]
+
+    store = Store()
+
+    blast = compute_graph_blast_radius(graph, "shop.models.Item", neo4j_store=store)
+
+    assert blast == {"persisted.result"}
+    assert store.args[0][1] == "shop.models.Item"
+    assert store.args[1]["max_hops"] is None
+
+
+def test_blast_radius_falls_back_to_memory_when_snapshot_is_not_in_neo4j():
+    graph = extract_graph(REPO)
+
+    class MissingSnapshotStore:
+        def blast_radius(self, *_args, **_kwargs):
+            raise LookupError("snapshot is not persisted")
+
+    blast = compute_graph_blast_radius(
+        graph, "shop.models.Item", neo4j_store=MissingSnapshotStore()
+    )
+
+    assert "shop.billing.checkout" in blast
 
 
 def test_filter_chunks_by_blast_radius_and_markdown_adr(tmp_path):

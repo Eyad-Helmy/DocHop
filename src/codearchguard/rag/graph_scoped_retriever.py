@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import re
+from typing import TYPE_CHECKING
 
 from llama_index.core import VectorStoreIndex
 from llama_index.core.schema import NodeWithScore, TextNode
@@ -12,6 +13,9 @@ from codearchguard.rag.document import Chunk
 from codearchguard.rag.llama_bm25_retriever import build_bm25_retriever
 from codearchguard.rag.llama_embedder import LlamaBGEEmbedder
 from codearchguard.rag.llama_hybrid_retriever import build_hybrid_retriever
+
+if TYPE_CHECKING:
+    from codearchguard.graph.neo4j_store import Neo4jStore
 
 
 @dataclass
@@ -31,17 +35,35 @@ def compute_graph_blast_radius(
     start_symbol: str,
     max_hops: int | None = None,
     include_containers: bool = True,
+    neo4j_store: "Neo4jStore | None" = None,
 ) -> set[str]:
     """
-    Cycle-safe BFS over CodeGraph matching Milestone 1.5 blast-radius rules:
+    Cycle-safe blast-radius traversal matching Milestone 1.5 rules:
       - CALLS (reversed: dst -> src): upstream callers affected if dst changes
       - INHERITS (reversed: dst -> src): subclasses affected if base dst changes
       - DEFINES (forward: src -> dst): members defined inside affected container src
     After BFS, optionally adds the enclosing Class/Module IDs of affected nodes
     so module/class docstrings are included without pulling in unrelated siblings.
+
+    When a Neo4j store is supplied, its persisted snapshot is attempted first.
+    The existing in-memory BFS remains the fallback if that snapshot is absent
+    or the database connection is unavailable.
     """
     if start_symbol not in graph.nodes:
         raise ValueError(f"Symbol '{start_symbol}' not found in CodeGraph.")
+
+    if neo4j_store is not None:
+        try:
+            persisted = neo4j_store.blast_radius(
+                graph,
+                start_symbol,
+                max_hops=max_hops,
+                include_containers=include_containers,
+            )
+            return {node.id for node in persisted}
+        except Exception as error:
+            if not _can_fall_back_from_neo4j(error):
+                raise
 
     adjacency: dict[str, set[str]] = {nid: set() for nid in graph.nodes}
     parent_container: dict[str, str] = {}
@@ -75,6 +97,13 @@ def compute_graph_blast_radius(
                 curr = parent_container.get(curr)
 
     return visited
+
+
+def _can_fall_back_from_neo4j(error: Exception) -> bool:
+    """Only expected persistence/connection failures activate local traversal."""
+    if isinstance(error, (LookupError, OSError, ConnectionError, TimeoutError)):
+        return True
+    return error.__class__.__module__.startswith("neo4j.exceptions")
 
 
 def _chunk_mentions_blast_symbol(text: str, blast_symbols: set[str]) -> bool:
