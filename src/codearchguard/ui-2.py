@@ -2,10 +2,12 @@
 CodeArchGuard — Interactive Web Demo & Architecture Assistant (`src/codearchguard/ui.py`)
 =========================================================================================
 Run directly from the repository root:
-    python src/codearchguard/ui.py
+    python src/codearchguard/ui-2.py
 Or via:
     python app.py
     cag ui
+
+This is meant to be a temporary ui for demos while development. A full more refined ui will be built indepedantly not on top of this one
 """
 
 from __future__ import annotations
@@ -31,12 +33,12 @@ _SRC_DIR = Path(__file__).resolve().parents[1]
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-import codearchguard.analysis.extractor as _extractor_mod
 from codearchguard.analysis.extractor import extract_graph
 from codearchguard.models import CodeGraph, EdgeKind, NodeKind
 from codearchguard.rag.chunking import chunk_documents
 from codearchguard.rag.code_ingestion import extract_code_documents
 from codearchguard.rag.document import Chunk
+from codearchguard.rag.doc_graph import attach_doc_chunks
 from codearchguard.rag.graph_scoped_retriever import (
     compute_graph_blast_radius,
     filter_chunks_by_blast_radius,
@@ -45,23 +47,6 @@ from codearchguard.rag.ingestion import extract_documents
 from codearchguard.rag.pipeline import RAGIngestionResult
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-# Skip nested `tests/fixtures/*` and `storage/` when analyzing `.` (DocHop root)
-_EXTRA_SKIP_DIRS = set(_extractor_mod.SKIP_DIRS) | {"storage"}
-
-
-def _clean_iter_python_files(root: Path):
-    for p in sorted(root.rglob("*.py")):
-        parts = p.relative_to(root).parts
-        if set(parts) & _EXTRA_SKIP_DIRS:
-            continue
-        if len(parts) >= 2 and parts[0] == "tests" and parts[1] == "fixtures":
-            continue
-        yield p
-
-
-_extractor_mod.iter_python_files = _clean_iter_python_files
-
 
 def _fast_ingest_without_duplicate_ast(
     repo_root: Path,
@@ -72,6 +57,7 @@ def _fast_ingest_without_duplicate_ast(
     documentation_documents = extract_documents(graph, repo_root)
     documents = code_documents + documentation_documents
     chunks = chunk_documents(documents, max_chars=max_chars)
+    attach_doc_chunks(graph, chunks)
     return RAGIngestionResult(graph=graph, documents=documents, chunks=chunks)
 
 
@@ -154,8 +140,8 @@ def _render_static_png(graph: CodeGraph, blast_set: set[str], out_file: Path) ->
     import matplotlib.pyplot as plt
     import networkx as nx
 
-    node_colors = {NodeKind.MODULE: "#4A90D9", NodeKind.CLASS: "#E8A838", NodeKind.FUNCTION: "#5BB85D"}
-    node_sizes = {NodeKind.MODULE: 3200, NodeKind.CLASS: 2200, NodeKind.FUNCTION: 1400}
+    node_colors = {NodeKind.MODULE: "#4A90D9", NodeKind.CLASS: "#E8A838", NodeKind.FUNCTION: "#5BB85D", NodeKind.DOC_CHUNK: "#A78BFA"}
+    node_sizes = {NodeKind.MODULE: 3200, NodeKind.CLASS: 2200, NodeKind.FUNCTION: 1400, NodeKind.DOC_CHUNK: 900}
     edge_styles = {
         EdgeKind.DEFINES: dict(edge_color="#888888", style="dotted", width=1.2),
         EdgeKind.IMPORTS: dict(edge_color="#4A90D9", style="dashed", width=1.8),

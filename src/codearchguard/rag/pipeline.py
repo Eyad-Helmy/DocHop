@@ -6,6 +6,7 @@ from codearchguard.analysis.extractor import extract_graph
 from codearchguard.models import CodeGraph
 
 from codearchguard.rag.document import Document, Chunk
+from codearchguard.rag.doc_graph import attach_doc_chunks
 from codearchguard.rag.ingestion import extract_documents
 from codearchguard.rag.code_ingestion import extract_code_documents
 from codearchguard.rag.chunking import chunk_documents
@@ -41,6 +42,7 @@ def run_ingestion(
 
     # 5. Convert documents into chunks
     chunks = chunk_documents(documents, max_chars=max_chars)
+    attach_doc_chunks(graph, chunks)    # attach docs to the graph
 
     # 6. Generate embeddings if an embedder is provided
     if embedder is not None and chunks:

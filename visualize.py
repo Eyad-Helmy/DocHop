@@ -34,17 +34,20 @@ NODE_COLORS = {
     NodeKind.MODULE:   "#4A90D9",   # blue
     NodeKind.CLASS:    "#E8A838",   # amber
     NodeKind.FUNCTION: "#5BB85D",   # green
+    NodeKind.DOC_CHUNK: "#A78BFA",  # violet
 }
 NODE_SIZES = {
     NodeKind.MODULE:   3200,
     NodeKind.CLASS:    2200,
     NodeKind.FUNCTION: 1400,
+    NodeKind.DOC_CHUNK: 900,
 }
 EDGE_STYLES = {
     EdgeKind.DEFINES:  dict(edge_color="#888888", style="dotted",  width=1.2, arrows=False),
     EdgeKind.IMPORTS:  dict(edge_color="#4A90D9", style="dashed",  width=1.8, arrows=True),
     EdgeKind.CALLS:    dict(edge_color="#E05252", style="solid",   width=2.2, arrows=True),
     EdgeKind.INHERITS: dict(edge_color="#9B59B6", style="solid",   width=2.2, arrows=True),
+    EdgeKind.DOCUMENTED_BY: dict(edge_color="#A78BFA", style="dotted", width=1.5, arrows=True),
 }
 
 
