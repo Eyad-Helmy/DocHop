@@ -8,6 +8,7 @@ class NodeKind(str, Enum):
     MODULE = "Module"
     CLASS = "Class"
     FUNCTION = "Function"
+    DOC_CHUNK = "DocChunk"
 
 
 class NodeRole(str, Enum):
@@ -22,6 +23,7 @@ class EdgeKind(str, Enum):
     IMPORTS = "IMPORTS"      # Module -> Module
     CALLS = "CALLS"          # Function -> Function
     INHERITS = "INHERITS"    # Class -> Class
+    DOCUMENTED_BY = "DOCUMENTED_BY"  # Symbol -> documentation chunk
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,9 @@ class Node:
     docstring: str = ""
     has_dynamic_warning: bool = False
     roles: frozenset[NodeRole] = field(default_factory=frozenset)
+    content: str = ""         # populated only for DocChunk nodes
+    owner_symbol_id: str = ""
+    source_type: str = ""
 
 
 @dataclass(frozen=True)

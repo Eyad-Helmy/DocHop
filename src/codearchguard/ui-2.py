@@ -2,10 +2,12 @@
 CodeArchGuard — Interactive Web Demo & Architecture Assistant (`src/codearchguard/ui.py`)
 =========================================================================================
 Run directly from the repository root:
-    python src/codearchguard/ui.py
+    python src/codearchguard/ui-2.py
 Or via:
     python app.py
     cag ui
+
+This is meant to be a temporary ui for demos while development. A full more refined ui will be built indepedantly not on top of this one
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from codearchguard.models import CodeGraph, EdgeKind, NodeKind
 from codearchguard.rag.chunking import chunk_documents
 from codearchguard.rag.code_ingestion import extract_code_documents
 from codearchguard.rag.document import Chunk
+from codearchguard.rag.doc_graph import attach_doc_chunks
 from codearchguard.rag.graph_scoped_retriever import (
     compute_graph_blast_radius,
     filter_chunks_by_blast_radius,
@@ -54,6 +57,7 @@ def _fast_ingest_without_duplicate_ast(
     documentation_documents = extract_documents(graph, repo_root)
     documents = code_documents + documentation_documents
     chunks = chunk_documents(documents, max_chars=max_chars)
+    attach_doc_chunks(graph, chunks)
     return RAGIngestionResult(graph=graph, documents=documents, chunks=chunks)
 
 
@@ -136,8 +140,8 @@ def _render_static_png(graph: CodeGraph, blast_set: set[str], out_file: Path) ->
     import matplotlib.pyplot as plt
     import networkx as nx
 
-    node_colors = {NodeKind.MODULE: "#4A90D9", NodeKind.CLASS: "#E8A838", NodeKind.FUNCTION: "#5BB85D"}
-    node_sizes = {NodeKind.MODULE: 3200, NodeKind.CLASS: 2200, NodeKind.FUNCTION: 1400}
+    node_colors = {NodeKind.MODULE: "#4A90D9", NodeKind.CLASS: "#E8A838", NodeKind.FUNCTION: "#5BB85D", NodeKind.DOC_CHUNK: "#A78BFA"}
+    node_sizes = {NodeKind.MODULE: 3200, NodeKind.CLASS: 2200, NodeKind.FUNCTION: 1400, NodeKind.DOC_CHUNK: 900}
     edge_styles = {
         EdgeKind.DEFINES: dict(edge_color="#888888", style="dotted", width=1.2),
         EdgeKind.IMPORTS: dict(edge_color="#4A90D9", style="dashed", width=1.8),
