@@ -54,6 +54,9 @@ def ask_repository(repo: Path, symbol: str, question: str) -> str:
         raise ValueError("Enter a question.")
     if not repo.is_dir():
         raise ValueError(f"Repository directory does not exist: {repo}")
+    from dotenv import load_dotenv
+
+    load_dotenv(Path.cwd() / ".env", override=False)
     model = os.environ.get("CAG_LLM_MODEL", "gemini/gemini-flash-latest").strip()
     provider = model.partition("/")[0]
     key = {"gemini": "GEMINI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}.get(provider)
