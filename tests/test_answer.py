@@ -6,10 +6,11 @@ from unittest.mock import Mock
 import pytest
 
 from codearchguard.cli import main
-from codearchguard.rag.answer import generate_answer
+from codearchguard.rag.answer import ABSTENTION, _check_evidence_ids, generate_answer
 
 
 def test_ask_reports_missing_key_before_ingestion(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("CAG_LLM_MODEL", raising=False)
     with pytest.raises(SystemExit) as exc:
@@ -38,3 +39,14 @@ def test_generation_sends_bounded_evidence_and_prints_source(monkeypatch, model)
     assert len(excerpts) == 5
     assert len(excerpts[0]["text"]) == 2500
     assert "[E1] shop.py:4-7" in answer
+
+
+@pytest.mark.parametrize("answer", ["An unsupported claim.", "Discount [E1] and tax [E9].", "Discount [E0]."])
+def test_invalid_evidence_ids_withhold_answer(answer):
+    with pytest.raises(ValueError, match="Answer withheld"):
+        _check_evidence_ids(answer, {"E1"})
+
+
+@pytest.mark.parametrize("answer", [ABSTENTION, "The code applies a multiplier [E1] [E2]."])
+def test_accepts_abstention_or_supplied_evidence(answer):
+    _check_evidence_ids(answer, {"E1", "E2"})
