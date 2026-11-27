@@ -1,5 +1,19 @@
 # CodeArchGuard (DocHop)
 
+### Ask Gemini about a symbol
+
+Install the optional generation dependency with `pip install -e ".[llm]"`.
+Set `GEMINI_API_KEY` in your shell, then run:
+
+```powershell
+cag ask tests/fixtures/sample_repo shop.models.DiscountedItem.total "How is the discount calculated?"
+```
+
+This sends the question, target symbol and up to five retrieved excerpts to the configured provider.
+The default LiteLLM model is `gemini/gemini-flash-latest`. To switch to OpenRouter,
+set `CAG_LLM_MODEL=openrouter/<provider>/<model>` and supply `OPENROUTER_API_KEY`.
+The printed file locations identify the retrieved excerpts. Model-generated citations are unverified.
+
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Architecture](https://img.shields.io/badge/architecture-GraphRAG-success.svg)](#architecture)
 [![Embeddings](https://img.shields.io/badge/embeddings-BGE--small--en--v1.5%20(Local)-brightgreen.svg)](#local-embeddings--caching)

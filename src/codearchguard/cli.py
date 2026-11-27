@@ -156,11 +156,23 @@ def main(argv=None):
     impact_parser.add_argument("--max-nodes", type=int, default=None, help="Optional Neo4j node safety limit")
     impact_parser.add_argument("--no-containers", action="store_true", help="Exclude enclosing classes/modules")
 
+    ask_parser = sub.add_parser("ask", help="Ask an LLM about graph-scoped repository excerpts")
+    ask_parser.add_argument("repo", type=Path)
+    ask_parser.add_argument("symbol", help="Fully qualified symbol ID")
+    ask_parser.add_argument("question")
+
     args = parser.parse_args(argv)
     if args.cmd == "analyze":
         _run_analyze(args)
     elif args.cmd == "impact":
         _run_impact(args)
+    elif args.cmd == "ask":
+        from codearchguard.rag.answer import ask_repository
+
+        try:
+            print(ask_repository(args.repo, args.symbol, args.question))
+        except (ValueError, RuntimeError) as error:
+            ask_parser.exit(1, f"cag ask: {error}\n")
 
 
 if __name__ == "__main__":
